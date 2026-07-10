@@ -16,14 +16,18 @@ function App() {
   const [showScanner, setShowScanner] = useState(false);
   const [isSecure, setIsSecure] = useState(true);
   
+  // Real-time Dashboard Popup states
   const [showTransferPopup, setShowTransferPopup] = useState(false);
   const [transferType, setTransferType] = useState(''); 
+
+  // Global Popup Notification Matrix
   const [showAlert, setShowAlert] = useState(false);
   const [alertMessage, setAlertMessage] = useState('');
 
   const peerRef = useRef(null);
   const html5QrCodeRef = useRef(null);
 
+  // Helper to flash premium popups on demand
   const triggerAlert = (msg, secureState = true) => {
     setAlertMessage(msg);
     setIsSecure(secureState);
@@ -45,34 +49,44 @@ function App() {
     peer.on('connection', (conn) => {
       setConnection(conn);
       setStatus('Connected');
-      triggerAlert("Secure Tunnel Established! You can now share files.", true);
+      triggerAlert("Secure Tunnel Established! Device linked successfully.", true);
       setupConnectionListeners(conn);
     });
     return () => peer.destroy();
   }, []);
 
-  // 📷 Fixed Fullscreen QR Scanner Lens (Without Native Br-borders)
+  // 📷 Fixed Fullscreen QR Scanner Lens (Auto-kill loop on successful scan)
   useEffect(() => {
     if (showScanner) {
       const scanner = new Html5Qrcode("camera-reader");
       html5QrCodeRef.current = scanner;
       
-      // Requesting transparent full screen area to override internal box limitations
       scanner.start(
         { facingMode: "environment" },
         { 
           fps: 20, 
-          qrbox: (width, height) => {
-            // Making library target match container boundary size to kill internal layouts
-            return { width: width, height: height };
-          }
+          qrbox: (width, height) => { return { width: width, height: height }; }
         },
-        (decodedText) => {
+        async (decodedText) => {
+          setShowScanner(false); 
+          if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
+            try {
+              await html5QrCodeRef.current.stop();
+              html5QrCodeRef.current = null;
+            } catch (err) {
+              console.error(err);
+            }
+          }
+
           setRemoteId(decodedText);
-          stopCamera();
+          
+          // Connect with 300ms network buffer delay after shutting camera loop
+          setTimeout(() => {
+            connectToPeer(decodedText);
+          }, 300);
         },
         () => {}
-      ).catch(() => triggerAlert("Camera Gateway Error", false));
+      ).catch(() => triggerAlert("Camera Gateway Access Error", false));
     }
     return () => { if (html5QrCodeRef.current) stopCamera(); };
   }, [showScanner]);
@@ -84,6 +98,7 @@ function App() {
     setShowScanner(false);
   };
 
+  // 📥 RECEIVER SIDE: Disk Storage Safe Stream Engine
   const setupConnectionListeners = (conn) => {
     let receivedChunks = [];
     let fileInfo = null;
@@ -102,7 +117,7 @@ function App() {
         setProgress(0);
         setTransferType('Receiving');
         setShowTransferPopup(true);
-        setStatus('Syncing Stream...');
+        setStatus('Streaming');
 
         if ('showSaveFilePicker' in window) {
           try {
@@ -140,7 +155,7 @@ function App() {
         setTimeout(() => {
           setShowTransferPopup(false);
           setProgress(0);
-          triggerAlert(`Successfully Received Asset: ${fileInfo.fileName}`, true);
+          triggerAlert(`Asset Received: ${fileInfo.fileName}`, true);
         }, 2500);
       }
     });
@@ -150,13 +165,13 @@ function App() {
       setConnection(null); 
       setProgress(0);
       setShowTransferPopup(false);
-      triggerAlert("Secure link terminated. Node disconnected.", false);
+      triggerAlert("Secure node bridge terminated. Disconnected.", false);
     });
   };
 
   const connectToPeer = (targetId = remoteId) => {
     if (!targetId) return;
-    setStatus('Pairing Devices...');
+    setStatus('Pairing...');
     
     const conn = peerRef.current.connect(targetId, {
       reliable: true,
@@ -166,22 +181,21 @@ function App() {
     setConnection(conn);
     conn.on('open', () => { 
       setStatus('Connected'); 
-      triggerAlert("Secure Tunnel Established! Ready to share.", true);
       setupConnectionListeners(conn); 
     });
   };
 
+  // 📤 SENDER SIDE: High-Speed WebRTC Loop
   const sendFile = () => {
     if (!connection) return;
     const dataChannel = connection._dc || connection.dataChannel;
 
     if (!dataChannel || dataChannel.readyState !== 'open') {
-      triggerAlert("Syncing matrix channel... Channel not ready yet. Retrying.", false);
-      setTimeout(() => { sendFile(); }, 1000);
+      triggerAlert("Syncing matrix channel... Please re-fire in 1 second.", false);
       return;
     }
 
-    setStatus('Streaming Data (MB/s)...');
+    setStatus('Streaming');
     setProgress(0);
     setTransferType('Sending');
     setShowTransferPopup(true);
@@ -253,11 +267,11 @@ function App() {
   return (
     <div className="flex justify-center items-center min-h-screen w-full px-4 py-6 sm:p-8 box-border">
       
-      {/* Animated RGB Card Outer Shell */}
+      {/* Animated RGB Card Shell */}
       <div className="relative p-[2px] rounded-2xl rgb-gradient-bg w-full max-w-full sm:max-w-md md:max-w-lg shadow-2xl shadow-purple-500/10 transition-all duration-300">
         <div className="glass-panel p-5 sm:p-7 rounded-[14px] text-slate-200">
           
-           {/* Brand Header */}
+         {/* Brand Header */}
           <div className="w-full mb-6">
             <div className="w-full h-12 flex items-center px-4 rounded-xl rgb-gradient-bg shadow-lg shadow-purple-500/20 border border-white/10 relative overflow-hidden">
               <div className="flex items-center gap-3 z-10">
@@ -271,7 +285,8 @@ function App() {
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full animate-[shimmer_4s_infinite]"></div>
             </div>
           </div>
-          {/* ---------------- SCREEN 1: DISCONNECTED PAIRING UI ---------------- */}
+
+          {/* ---------------- SCREEN 1: PAIRING CONNECT MODE (Disconnected Screen) ---------------- */}
           {status !== 'Connected' && !showTransferPopup && (
             <div className="animate-fade-in">
               <div className="mb-5">
@@ -329,45 +344,30 @@ function App() {
             </div>
           )}
 
-          {/* --- 🎯 ULTRA MODERN FULLSCREEN CAMERA OVERLAY POPUP (Single Custom Rect-Box Only) --- */}
+          {/* Camera Viewfinder Overlay Modal (Single Frame Only) */}
           {showScanner && (
             <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex flex-col justify-center items-center z-50 p-4 animate-fade-in box-border">
               <div className="w-full max-w-sm rounded-2xl border border-purple-500/20 p-5 glass-panel text-center relative">
-                
                 <div className="flex justify-between items-center mb-4">
                   <span className="text-xs sm:text-sm font-bold tracking-wider text-purple-400 uppercase">Encrypted Lens Tunnel</span>
-                  <button onClick={stopCamera} className="p-1 hover:bg-slate-800 rounded-full text-slate-400 hover:text-rose-400 transition">
-                    <X size={20} />
-                  </button>
+                  <button onClick={stopCamera} className="p-1 hover:bg-slate-800 rounded-full text-slate-400 hover:text-rose-400 transition"><X size={20} /></button>
                 </div>
-
-                {/* Video Mask Area */}
                 <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-black flex items-center justify-center">
-                  
-                  {/* Clean native pipeline layer (All default elements targeted and forced transparent) */}
                   <div id="camera-reader" className="w-full h-full absolute inset-0 [&_span]:!hidden [&_div]:!border-none [&_div]:!box-shadow-none"></div>
-                  
-                  {/* 🟢 THE ONLY STATIC SINGLE SECURITY FOCUS BOX */}
                   <div className="absolute w-[200px] h-[200px] border border-purple-500/40 pointer-events-none z-10 flex items-center justify-center rounded-lg shadow-[0_0_30px_rgba(168,85,247,0.25)]">
-                    
-                    {/* Cyber Tech Corners */}
                     <div className="absolute -top-[2px] -left-[2px] w-5 h-5 border-t-4 border-l-4 border-purple-400 rounded-tl-md"></div>
                     <div className="absolute -top-[2px] -right-[2px] w-5 h-5 border-t-4 border-r-4 border-purple-400 rounded-tr-md"></div>
                     <div className="absolute -bottom-[2px] -left-[2px] w-5 h-5 border-b-4 border-l-4 border-purple-400 rounded-bl-md"></div>
                     <div className="absolute -bottom-[2px] -right-[2px] w-5 h-5 border-b-4 border-r-4 border-purple-400 rounded-br-md"></div>
-                    
-                    {/* Pulsing Laser Matrix Scanner Line */}
                     <div className="absolute left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-purple-400 to-transparent shadow-[0_0_12px_rgba(168,85,247,1)] animate-[scanLine_2s_ease-in-out_infinite]"></div>
                   </div>
-
                 </div>
-
                 <p className="text-[11px] text-slate-400 mt-4 tracking-wide font-medium">Position target QR matrix code fully within framework</p>
               </div>
             </div>
           )}
 
-          {/* ---------------- SCREEN 2: CONNECTED AUTO FILE SHARE UI ---------------- */}
+          {/* ---------------- SECTION 2: AUTO TRANSFER PANEL (Connected Screen) ---------------- */}
           {status === 'Connected' && (
             <div className="animate-fade-in w-full">
               <div className="bg-gradient-to-r from-emerald-950/40 to-slate-900/40 border border-emerald-500/30 rounded-xl p-4 flex items-center justify-between mb-5 shadow-inner">
@@ -410,7 +410,7 @@ function App() {
             </div>
           )}
 
-          {/* --- ACTIVE SYSTEM TRANSFER DASHBOARD POPUP --- */}
+          {/* --- ACTIVE SYSTEM TRANSFER MOVEMENT MODAL POPUP --- */}
           {showTransferPopup && (
             <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md flex justify-center items-center z-50 p-4 animate-fade-in">
               <div className="relative p-[2px] rounded-2xl rgb-gradient-bg w-full max-w-sm shadow-2xl shadow-purple-500/30">
@@ -433,7 +433,7 @@ function App() {
                     <div className="rgb-gradient-bg h-full rounded-full transition-all duration-150 shadow-[0_0_8px_rgba(59,130,246,0.6)]" style={{ width: `${progress}%` }}></div>
                   </div>
                   <div className="bg-slate-950/60 rounded-xl p-2.5 border border-purple-500/20 text-[10px] sm:text-xs font-mono tracking-wide text-purple-300">
-                    🛡️ WebRTC Safe Tunnel Pipeline Active
+                    🛡️ WebRTC Tunnel Operational at Max Capacity
                   </div>
                   {progress < 100 && (
                     <button 
@@ -448,10 +448,10 @@ function App() {
             </div>
           )}
 
-          {/* --- GLOBAL APP SYSTEM DIALOG MODAL POPUP --- */}
+          {/* --- 🎯 GLOBAL DIALOG ALERT MODAL POPUP (Completely replaces the old strip) --- */}
           {showAlert && (
-            <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex justify-center items-center z-50 p-4 animate-fade-in">
-              <div className={`relative p-[1.5px] rounded-2xl w-full max-w-xs shadow-xl ${isSecure ? 'bg-emerald-500/40' : 'bg-blue-500/40'}`}>
+            <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex justify-center items-center z-50 p-4 animate-fade-in">
+              <div className={`relative p-[1.5px] rounded-2xl w-full max-w-xs shadow-2xl transition-all duration-300 ${isSecure ? 'bg-emerald-500/40 shadow-emerald-500/10' : 'bg-blue-500/40 shadow-blue-500/10'}`}>
                 <div className="glass-panel p-5 rounded-[14px] text-center text-slate-200">
                   <div className="flex justify-center mb-3">
                     {isSecure ? (
@@ -465,7 +465,7 @@ function App() {
                     )}
                   </div>
                   <h4 className={`text-sm font-black tracking-wider uppercase mb-1 ${isSecure ? 'text-emerald-400' : 'text-blue-400'}`}>
-                    {isSecure ? "System Secure" : "System Notification"}
+                    {isSecure ? "System Secure" : "System Alert"}
                   </h4>
                   <p className="text-xs text-slate-400 leading-relaxed font-medium mb-4 px-2">
                     {alertMessage}
@@ -473,7 +473,7 @@ function App() {
                   <button 
                     onClick={() => setShowAlert(false)}
                     className={`w-full font-bold text-xs py-2 rounded-xl uppercase tracking-wider transition active:scale-95 ${
-                      isSecure ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'
+                      isSecure ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg'
                     }`}
                   >
                     Acknowledge
