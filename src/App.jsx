@@ -328,20 +328,36 @@ function App() {
 
     setConnection(conn);
 
-    conn.on('open', () => {
+    let openHandled = false;
+    const handleOpen = () => {
+      if (openHandled) return; openHandled = true;
       pushLog('Data connection opened to ' + pid);
       // reset retry count on success
       retryCountsRef.current[pid] = 0;
       setStatus('Connected');
       try { triggerAlert(`Secure Tunnel Established with ${pid}`, true, 2600); } catch {}
       setupConnectionListeners(conn);
-    });
+      if (connectTimeout) clearTimeout(connectTimeout);
+    };
+
+    // immediate-open cases
+    try { if (conn.open === true || conn._open === true) handleOpen(); } catch {}
+
+    conn.on('open', handleOpen);
 
     conn.on('error', (err) => {
       console.error('Peer connection error:', err);
       pushLog('Conn error: ' + (err?.message || String(err)));
       triggerAlert('Connection error: ' + (err?.message || 'Unexpected'), false, 3000);
     });
+
+    // if open doesn't fire within X ms, notify user
+    const connectTimeout = setTimeout(() => {
+      if (!openHandled) {
+        pushLog('Connection timeout to ' + pid);
+        triggerAlert('Connection timed out. Remote may be offline or blocked.', false, 4000);
+      }
+    }, 7000);
 
     conn.on('close', () => {
       pushLog('Data connection closed to ' + pid);
