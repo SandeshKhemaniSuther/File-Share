@@ -28,10 +28,21 @@ function App() {
   const html5QrCodeRef = useRef(null);
 
   // Helper to flash premium popups on demand
-  const triggerAlert = (msg, secureState = true) => {
+  const alertTimeoutRef = useRef(null);
+  const triggerAlert = (msg, secureState = true, timeout = 2500) => {
     setAlertMessage(msg);
     setIsSecure(secureState);
     setShowAlert(true);
+    if (alertTimeoutRef.current) {
+      clearTimeout(alertTimeoutRef.current);
+      alertTimeoutRef.current = null;
+    }
+    if (timeout && typeof timeout === 'number') {
+      alertTimeoutRef.current = setTimeout(() => {
+        setShowAlert(false);
+        alertTimeoutRef.current = null;
+      }, timeout);
+    }
   };
 
   useEffect(() => {
@@ -68,21 +79,28 @@ function App() {
           qrbox: (width, height) => { return { width: width, height: height }; }
         },
         async (decodedText) => {
-          setShowScanner(false); 
-          if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
-            try {
+          const raw = (decodedText || '').toString();
+          const peerIdFromQr = raw.trim();
+
+          try {
+            if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
               await html5QrCodeRef.current.stop();
               html5QrCodeRef.current = null;
-            } catch (err) {
-              console.error(err);
             }
+          } catch (err) {
+            console.error('QR scanner stop error:', err);
           }
 
-          setRemoteId(decodedText);
-          
-          // Connect with 300ms network buffer delay after shutting camera loop
+          if (!peerIdFromQr) {
+            triggerAlert('Scanned QR is empty or invalid', false);
+            return;
+          }
+
+          setRemoteId(peerIdFromQr);
+
+          // Connect with a short buffer after shutting the camera
           setTimeout(() => {
-            connectToPeer(decodedText);
+            try { connectToPeer(peerIdFromQr); } catch (err) { console.error('connectToPeer error:', err); triggerAlert('Connection attempt failed', false); }
           }, 300);
         },
         () => {}
@@ -90,6 +108,26 @@ function App() {
     }
     return () => { if (html5QrCodeRef.current) stopCamera(); };
   }, [showScanner]);
+
+  // Auto-popup alerts on status changes (replace inline status-only messaging)
+  const prevStatusRef = useRef(status);
+  useEffect(() => {
+    if (prevStatusRef.current === status) return;
+    prevStatusRef.current = status;
+
+    // Do not show status popups while transfer modal is active
+    if (showTransferPopup) return;
+
+    const statusMap = {
+      'Connected': { msg: 'Secure Tunnel Established', secure: true },
+      'Disconnected': { msg: 'Shield: Disconnected', secure: false },
+      'Pairing...': { msg: 'Attempting to pair with remote node...', secure: false },
+      'Streaming': { msg: 'Data stream in progress', secure: true }
+    };
+
+    const info = statusMap[status];
+    if (info) triggerAlert(info.msg, info.secure, 2800);
+  }, [status, showTransferPopup]);
 
   const stopCamera = async () => {
     if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
