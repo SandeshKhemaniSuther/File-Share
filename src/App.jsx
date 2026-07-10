@@ -26,6 +26,14 @@ function App() {
 
   const peerRef = useRef(null);
   const html5QrCodeRef = useRef(null);
+  const [logs, setLogs] = useState([]);
+
+  const [showLogs, setShowLogs] = useState(false);
+
+  const pushLog = (msg) => {
+    try { setLogs((s) => [ `${new Date().toLocaleTimeString()} — ${msg}`, ...s ].slice(0, 8)); } catch {}
+    try { console.info('LOG:', msg); } catch {}
+  };
 
   // Helper to flash premium popups on demand
   const alertTimeoutRef = useRef(null);
@@ -55,19 +63,22 @@ function App() {
       }
     });
     peerRef.current = peer;
-    peer.on('open', (id) => setPeerId(id));
+    peer.on('open', (id) => { setPeerId(id); pushLog(`Local peer open: ${id}`); });
     
     peer.on('connection', (conn) => {
+      pushLog('Incoming connection from: ' + conn.peer);
       setConnection(conn);
       setStatus('Connected');
       triggerAlert("Secure Tunnel Established! Device linked successfully.", true);
       setupConnectionListeners(conn);
     });
     peer.on('disconnected', () => {
+      pushLog('Peer disconnected from server');
       setStatus('Disconnected');
       triggerAlert('Peer disconnected from server', false, 2200);
     });
     peer.on('error', (err) => {
+      pushLog('Peer error: ' + (err?.message || String(err)));
       console.error('Peer error:', err);
       triggerAlert('Peer error: ' + (err?.message || 'Unexpected'), false, 3000);
     });
@@ -112,10 +123,32 @@ function App() {
     });
     peerRef.current = newPeer;
     newPeer.on('open', (id) => setPeerId(id));
-    newPeer.on('connection', (conn) => { setConnection(conn); setStatus('Connected'); setupConnectionListeners(conn); triggerAlert('Secure Tunnel Established', true); });
-    newPeer.on('error', (e) => { console.error('recreated peer error', e); triggerAlert('Peer recreate error', false); });
+    newPeer.on('connection', (conn) => { pushLog('Incoming connection on recreated peer: ' + conn.peer); setConnection(conn); setStatus('Connected'); setupConnectionListeners(conn); triggerAlert('Secure Tunnel Established', true); });
+    newPeer.on('error', (e) => { pushLog('Recreated peer error: ' + (e?.message || String(e))); console.error('recreated peer error', e); triggerAlert('Peer recreate error', false); });
     triggerAlert('Peer recreated — new ID generating', false, 1800);
   };
+
+  const parsePeerIdFromString = (raw) => {
+    if (!raw) return '';
+    const s = raw.toString().trim();
+    // try URL ?id= style
+    try {
+      const u = new URL(s);
+      const qp = u.searchParams.get('id') || u.searchParams.get('peer');
+      if (qp) return qp.trim();
+      const parts = u.pathname.split('/').filter(Boolean);
+      if (parts.length) return parts.pop().trim();
+    } catch {}
+
+    // try common query like id= in plain text
+    const idMatch = s.match(/(?:\?|\b)id=([A-Za-z0-9_-]{6,})/i);
+    if (idMatch && idMatch[1]) return idMatch[1];
+
+    // fallback: return trimmed string (remove surrounding brackets)
+    return s.replace(/^peer:\/\//i, '').replace(/^"|"$/g, '').trim();
+  };
+
+  const retryCountsRef = useRef({});
 
   // 📷 Fixed Fullscreen QR Scanner Lens (Auto-kill loop on successful scan)
   useEffect(() => {
@@ -148,13 +181,14 @@ function App() {
           }
 
           setRemoteId(peerIdFromQr);
+          pushLog('QR scanned -> ' + peerIdFromQr);
 
           // Show a full-screen popup immediately after a successful scan
           try { triggerAlert(`Scanned QR: ${peerIdFromQr} — attempting to connect...`, false, 2000); } catch {}
 
           // Connect with a short buffer after shutting the camera
           setTimeout(() => {
-            try { connectToPeer(peerIdFromQr); } catch (err) { console.error('connectToPeer error:', err); triggerAlert('Connection attempt failed', false); }
+            try { pushLog('Attempting connect to ' + peerIdFromQr); connectToPeer(peerIdFromQr); } catch (err) { console.error('connectToPeer error:', err); triggerAlert('Connection attempt failed', false); }
           }, 300);
         },
         () => {}
@@ -212,7 +246,7 @@ function App() {
         setStatus('Streaming');
 
         // Notify user that receiving has started
-        try { triggerAlert(`Receiving: ${fileInfo.fileName || 'file'}`, true, 2500); } catch {}
+        try { pushLog('Receiving start: ' + (fileInfo.fileName || 'file')); triggerAlert(`Receiving: ${fileInfo.fileName || 'file'}`, true, 2500); } catch {}
 
         if ('showSaveFilePicker' in window) {
           try {
@@ -255,9 +289,10 @@ function App() {
       }
     });
 
-    conn.on('close', () => { 
-      setStatus('Disconnected'); 
-      setConnection(null); 
+    conn.on('close', () => {
+      pushLog('Connection closed: ' + (conn.peer || 'unknown'));
+      setStatus('Disconnected');
+      setConnection(null);
       setProgress(0);
       setShowTransferPopup(false);
       triggerAlert("Secure node bridge terminated. Disconnected.", false);
@@ -265,16 +300,26 @@ function App() {
   };
 
   const connectToPeer = (targetId = remoteId) => {
-    if (!targetId) return;
+    const raw = targetId;
+    const pid = parsePeerIdFromString(raw);
+    if (!pid) { triggerAlert('Invalid target ID', false); return; }
+
     setStatus('Pairing...');
     if (!peerRef.current) {
       triggerAlert('Local peer not ready', false);
       return;
     }
 
+    retryCountsRef.current[pid] = retryCountsRef.current[pid] || 0;
+    if (retryCountsRef.current[pid] > 3) {
+      triggerAlert('Failed to connect after multiple attempts', false, 3500);
+      return;
+    }
+
     let conn;
     try {
-      conn = peerRef.current.connect(targetId);
+      pushLog('connectToPeer: calling peer.connect -> ' + pid);
+      conn = peerRef.current.connect(pid);
     } catch (err) {
       console.error('connect error:', err);
       triggerAlert('Connection initiation failed', false);
@@ -284,20 +329,33 @@ function App() {
     setConnection(conn);
 
     conn.on('open', () => {
+      pushLog('Data connection opened to ' + pid);
+      // reset retry count on success
+      retryCountsRef.current[pid] = 0;
       setStatus('Connected');
-      try { triggerAlert(`Secure Tunnel Established with ${targetId}`, true, 2600); } catch {}
+      try { triggerAlert(`Secure Tunnel Established with ${pid}`, true, 2600); } catch {}
       setupConnectionListeners(conn);
     });
 
     conn.on('error', (err) => {
       console.error('Peer connection error:', err);
+      pushLog('Conn error: ' + (err?.message || String(err)));
       triggerAlert('Connection error: ' + (err?.message || 'Unexpected'), false, 3000);
     });
 
     conn.on('close', () => {
+      pushLog('Data connection closed to ' + pid);
       setStatus('Disconnected');
       setConnection(null);
       triggerAlert('Connection closed', false, 1800);
+
+      // retry with backoff
+      retryCountsRef.current[pid] = (retryCountsRef.current[pid] || 0) + 1;
+      const backoff = Math.min(3000 * retryCountsRef.current[pid], 10000);
+      pushLog(`Scheduling reconnect to ${pid} in ${backoff}ms (attempt ${retryCountsRef.current[pid]})`);
+      setTimeout(() => {
+        try { connectToPeer(pid); } catch (e) { pushLog('Reconnect failed: ' + String(e)); }
+      }, backoff);
     });
   };
 
@@ -335,6 +393,7 @@ function App() {
       const totalChunks = Math.ceil(buffer.byteLength / CHUNK_SIZE);
 
       try {
+        pushLog('Sending start -> ' + file.name + ' chunks:' + totalChunks);
         connection.send({ type: 'start', fileName: file.name, fileType: file.type || 'application/octet-stream', totalChunks });
       } catch (err) {
         console.error('send start error', err);
@@ -367,6 +426,7 @@ function App() {
 
       try {
         connection.send({ type: 'end' });
+        pushLog('Sent end');
       } catch (err) {
         console.error('send end error', err);
       }
@@ -455,7 +515,7 @@ function App() {
                     className="flex-1 min-w-0 bg-slate-950/60 border border-slate-800 rounded-xl px-3 py-2 text-xs sm:text-sm focus:outline-none focus:border-purple-500 transition"
                   />
                   <button 
-                    onClick={() => connectToPeer()} 
+                    onClick={() => connectToPeer(remoteId)} 
                     className="bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs sm:text-sm px-3 sm:px-4 rounded-xl shadow-lg active:scale-95 transition flex items-center"
                     disabled={!remoteId}
                   >
@@ -612,6 +672,18 @@ function App() {
           )}
 
         </div>
+      </div>
+      {/* Log panel toggle + panel */}
+      <div className="fixed left-4 bottom-4 z-50">
+        <button onClick={() => setShowLogs((s) => !s)} className="mb-2 p-2 rounded-full bg-slate-800 text-slate-200 shadow-lg">Logs</button>
+        {showLogs && (
+          <div className="w-80 max-w-xs bg-black/80 text-slate-200 rounded-lg p-3 shadow-xl">
+            <div className="text-xs font-bold mb-2">Recent Logs</div>
+            <div className="text-[11px] max-h-48 overflow-auto font-mono space-y-1">
+              {logs.length === 0 ? <div className="text-slate-400">No logs yet</div> : logs.map((l, i) => <div key={i} className="text-slate-300">{l}</div>)}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
