@@ -15,7 +15,7 @@ function App() {
   const [showQR, setShowQR] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [isSecure, setIsSecure] = useState(true);
-  
+
   const peerRef = useRef(null);
   const html5QrCodeRef = useRef(null);
 
@@ -30,7 +30,7 @@ function App() {
     });
     peerRef.current = peer;
     peer.on('open', (id) => setPeerId(id));
-    
+
     peer.on('connection', (conn) => {
       setConnection(conn);
       setStatus('Connected (Secure Tunnel)');
@@ -45,7 +45,8 @@ function App() {
       html5QrCodeRef.current = scanner;
       scanner.start(
         { facingMode: "environment" },
-        { fps: 15, qrbox: (width, height) => {
+        {
+          fps: 15, qrbox: (width, height) => {
             const minSize = Math.min(width, height);
             const size = Math.floor(minSize * 0.65);
             return { width: size, height: size };
@@ -55,7 +56,7 @@ function App() {
           setRemoteId(decodedText);
           stopCamera();
         },
-        () => {}
+        () => { }
       ).catch(() => setStatus("Camera Error"));
     }
     return () => { if (html5QrCodeRef.current) stopCamera(); };
@@ -63,7 +64,7 @@ function App() {
 
   const stopCamera = async () => {
     if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
-      try { await html5QrCodeRef.current.stop(); html5QrCodeRef.current = null; } catch {}
+      try { await html5QrCodeRef.current.stop(); html5QrCodeRef.current = null; } catch { }
     }
     setShowScanner(false);
   };
@@ -102,9 +103,9 @@ function App() {
       }
     });
 
-    conn.on('close', () => { 
-      setStatus('Disconnected'); 
-      setConnection(null); 
+    conn.on('close', () => {
+      setStatus('Disconnected');
+      setConnection(null);
       setIsSecure(true);
       setProgress(0);
     });
@@ -115,9 +116,9 @@ function App() {
     setStatus('Establishing P2P Tunnel...');
     const conn = peerRef.current.connect(targetId);
     setConnection(conn);
-    conn.on('open', () => { 
-      setStatus('Connected (Secure Tunnel)'); 
-      setupConnectionListeners(conn); 
+    conn.on('open', () => {
+      setStatus('Connected (Secure Tunnel)');
+      setupConnectionListeners(conn);
     });
   };
 
@@ -127,18 +128,18 @@ function App() {
     setStatus('Streaming Data (MB/s)...');
     setProgress(0);
 
-    const CHUNK_SIZE = 256 * 1024; 
+    const CHUNK_SIZE = 256 * 1024;
     const reader = new FileReader();
-    
+
     reader.onload = async (e) => {
       const buffer = e.target.result;
       const totalChunks = Math.ceil(buffer.byteLength / CHUNK_SIZE);
-      
-      connection.send({ 
-        type: 'start', 
-        fileName: file.name, 
+
+      connection.send({
+        type: 'start',
+        fileName: file.name,
         fileType: file.type || 'application/octet-stream',
-        totalChunks 
+        totalChunks
       });
 
       let currentChunk = 0;
@@ -184,7 +185,7 @@ function App() {
     <div className="flex justify-center items-center min-h-screen w-full px-4 py-6 sm:p-8 box-border">
       <div className="relative p-[2px] rounded-2xl rgb-gradient-bg w-full max-w-full sm:max-w-md md:max-w-lg shadow-2xl shadow-purple-500/10 transition-all duration-300">
         <div className="glass-panel p-5 sm:p-7 rounded-[14px] text-slate-200">
-          
+
           {/* Brand Header */}
           <div className="w-full mb-6">
             <div className="w-full h-12 flex items-center px-4 rounded-xl rgb-gradient-bg shadow-lg shadow-purple-500/20 border border-white/10 relative overflow-hidden">
@@ -206,7 +207,7 @@ function App() {
             <div className="flex justify-between items-center bg-slate-950/60 neon-border-blue p-3 rounded-xl">
               <span className="font-mono text-xs sm:text-sm text-blue-400 truncate w-2/3 sm:w-3/4">{peerId || 'Generating Firewall Token...'}</span>
               <div className="flex gap-1.5 sm:gap-2">
-                <button 
+                <button
                   onClick={() => { navigator.clipboard.writeText(peerId); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
                   className="p-1.5 sm:p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-blue-400 transition"
                 >
@@ -233,23 +234,23 @@ function App() {
           <div className="mb-5">
             <label className="block text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Target Gateway</label>
             <div className="flex flex-row gap-2 w-full">
-              <input 
-                type="text" 
-                placeholder="Target ID" 
+              <input
+                type="text"
+                placeholder="Target ID"
                 value={remoteId}
                 onChange={(e) => setRemoteId(e.target.value)}
                 className="flex-1 min-w-0 bg-slate-950/60 border border-slate-800 rounded-xl px-3 py-2 text-xs sm:text-sm focus:outline-none focus:border-purple-500 transition"
                 disabled={status.includes('Connected')}
               />
-              <button 
-                onClick={() => connectToPeer()} 
+              <button
+                onClick={() => connectToPeer()}
                 className="bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs sm:text-sm px-3 sm:px-4 rounded-xl shadow-lg active:scale-95 transition flex items-center"
                 disabled={status.includes('Connected') || !remoteId}
               >
                 <ArrowRight size={16} />
               </button>
-              <button 
-                onClick={() => setShowScanner(true)} 
+              <button
+                onClick={() => setShowScanner(true)}
                 className="bg-slate-800 hover:bg-slate-700 text-purple-400 border border-purple-500/30 p-2 sm:p-2.5 rounded-xl transition flex items-center shrink-0"
                 disabled={status.includes('Connected')}
               >
@@ -258,26 +259,52 @@ function App() {
             </div>
           </div>
 
-          {/* Scanner Overlay */}
+          {/* --- Zapya Style Camera Overlay Modal --- */}
           {showScanner && (
             <div className="fixed inset-0 bg-slate-950/95 flex justify-center items-center z-50 p-4 box-border animate-fade-in">
-              <div className="glass-panel neon-border-purple p-4 rounded-2xl w-full max-w-sm sm:max-w-md text-center relative box-border">
+              <div className="glass-panel neon-border-purple p-4 rounded-2xl w-full max-w-sm text-center relative box-border">
+
+                {/* Modal Header */}
                 <div className="flex justify-between items-center mb-4">
                   <span className="text-xs sm:text-sm font-bold tracking-wider text-purple-400 uppercase">Encrypted Lens Tunnel</span>
-                  <button onClick={stopCamera} className="p-1 hover:bg-slate-800 rounded-full text-slate-400 hover:text-rose-400"><X size={20} /></button>
+                  <button onClick={stopCamera} className="p-1 hover:bg-slate-800 rounded-full text-slate-400 hover:text-rose-400 transition">
+                    <X size={20} />
+                  </button>
                 </div>
-                <div id="camera-reader" className="w-full h-auto rounded-xl overflow-hidden border border-purple-500/20 bg-black aspect-square"></div>
-                <p className="text-[11px] sm:text-xs text-slate-500 mt-3">Scan verified nodes only</p>
+
+                {/* Camera Viewport Container with Target Box Overlay */}
+                <div className="relative w-full rounded-xl overflow-hidden border border-purple-500/20 bg-black aspect-square flex items-center justify-center">
+
+                  {/* Actual Live Video Target Element */}
+                  <div id="camera-reader" className="w-full h-full absolute inset-0"></div>
+
+                  {/* --- Floating Target Viewfinder Box (Exact Size of QR Code) --- */}
+                  <div className="absolute w-[200px] h-[200px] border-2 border-dashed border-purple-400/40 pointer-events-none z-10 flex items-center justify-center rounded-lg shadow-[0_0_20px_rgba(168,85,247,0.15)]">
+
+                    {/* Cyberpunk Scanner Corners */}
+                    <div className="absolute -top-1 -left-1 w-5 h-5 border-t-4 border-l-4 border-purple-400 rounded-tl-sm"></div>
+                    <div className="absolute -top-1 -right-1 w-5 h-5 border-t-4 border-r-4 border-purple-400 rounded-tr-sm"></div>
+                    <div className="absolute -bottom-1 -left-1 w-5 h-5 border-b-4 border-l-4 border-purple-400 rounded-bl-sm"></div>
+                    <div className="absolute -bottom-1 -right-1 w-5 h-5 border-b-4 border-r-4 border-purple-400 rounded-br-sm">sm</div>
+
+                    {/* Animated Neon Laser Scan Line */}
+                    <div className="absolute left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-purple-400 to-transparent shadow-[0_0_8px_rgba(168,85,247,1)] animate-[scanLine_2s_ease-in-out_infinite]"></div>
+                  </div>
+
+                </div>
+
+                <p className="text-[11px] sm:text-xs text-slate-400 mt-4">
+                  Fit the QR code completely inside the target frame
+                </p>
               </div>
             </div>
           )}
 
           {/* Protection Shield Indicator */}
-          <div className={`p-3 rounded-xl border flex items-center justify-between text-[11px] sm:text-xs font-bold tracking-wider uppercase mb-5 transition-all duration-300 ${
-            isSecure 
-              ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-400 neon-border-green' 
+          <div className={`p-3 rounded-xl border flex items-center justify-between text-[11px] sm:text-xs font-bold tracking-wider uppercase mb-5 transition-all duration-300 ${isSecure
+              ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-400 neon-border-green'
               : 'bg-rose-950/40 border-rose-500/40 text-rose-400 neon-border-red'
-          }`}>
+            }`}>
             <span className="truncate">Shield: {status}</span>
             {isSecure ? <ShieldCheck size={18} className="shrink-0 text-emerald-400" /> : <ShieldAlert size={18} className="shrink-0 text-rose-400" />}
           </div>
@@ -298,19 +325,38 @@ function App() {
           {/* Isolated Sandbox Dropper */}
           {status.includes('Connected') && (
             <div className="animate-fade-in w-full">
-              <label className="block text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Isolated Sandbox Dropper</label>
-              <div className="relative group border-2 border-dashed border-slate-700 hover:border-purple-500/60 rounded-xl p-5 sm:p-7 transition text-center cursor-pointer bg-slate-950/20">
-                <input type="file" onChange={(e) => setFile(e.target.files[0])} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10" />
-                <div className="flex flex-col items-center gap-2 justify-center">
-                  <UploadCloud size={24} className="text-slate-500 group-hover:text-purple-400 transition" />
-                  <p className="text-[11px] sm:text-xs text-slate-400 group-hover:text-purple-300 transition px-2 truncate max-w-full">
-                    {file ? `Verified: ${file.name}` : 'Drop ANY file extension here'}
-                  </p>
-                </div>
+              <label className="block text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                Payload Dispatch
+              </label>
+
+              {/* Dynamic Standalone Select File Button */}
+              <div className="relative w-full mb-3">
+                <input
+                  type="file"
+                  onChange={(e) => setFile(e.target.files[0])}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-20"
+                />
+                <button className="w-full bg-slate-800 hover:bg-slate-700 text-purple-400 font-bold text-xs sm:text-sm py-2.5 rounded-xl border border-purple-500/30 shadow-md transition-all active:scale-[0.98] flex items-center justify-center gap-2 tracking-wide uppercase">
+                  <UploadCloud size={16} />
+                  Select File
+                </button>
               </div>
-              <button 
-                onClick={sendFile} 
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm py-2.5 sm:py-3 rounded-xl shadow-lg active:scale-[0.98] transition mt-3 uppercase tracking-wide"
+
+              {/* Dropzone Display Board (Shows selected file status) */}
+              <div className="border-2 border-dashed border-slate-800 rounded-xl p-4 text-center bg-slate-950/10 transition duration-300">
+                <p className="text-[11px] sm:text-xs text-slate-400 px-2 truncate max-w-full font-mono">
+                  {file ? (
+                    <span className="text-emerald-400 font-bold">Verified: {file.name}</span>
+                  ) : (
+                    "No asset loaded in isolation barrier"
+                  )}
+                </p>
+              </div>
+
+              {/* Broadcast / Send Button */}
+              <button
+                onClick={sendFile}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm py-2.5 sm:py-3 rounded-xl shadow-lg active:scale-[0.98] transition mt-3 uppercase tracking-wide neon-border-green"
                 disabled={!file || progress > 0}
               >
                 Fire Secure Stream
