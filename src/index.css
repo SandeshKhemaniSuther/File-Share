@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply bg-[#0b0f19] text-slate-100 min-h-screen selection:bg-purple-500 selection:text-white overflow-x-hidden antialiased;
+    background-image: 
+      radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.12) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, rgba(217, 70, 239, 0.12) 0px, transparent 50%);
+  }
+}
+
+.neon-border-blue { box-shadow: 0 0 10px rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); }
+.neon-border-purple { box-shadow: 0 0 12px rgba(168, 85, 247, 0.2); border: 1px solid rgba(168, 85, 247, 0.3); }
+.neon-border-green { box-shadow: 0 0 10px rgba(34, 197, 94, 0.2); border: 1px solid rgba(34, 197, 94, 0.3); }
+.neon-border-red { box-shadow: 0 0 10px rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.3); }
+.neon-text-rgb { text-shadow: 0 0 8px rgba(168, 85, 247, 0.4); }
+
+.glass-panel {
+  background: rgba(15, 23, 42, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.rgb-gradient-bg {
+  background: linear-gradient(90deg, #3b82f6, #a855f7, #ec4899, #3b82f6);
+  background-size: 300% 100%;
+  animation: RGBFlow 5s linear infinite;
+}
+
+@keyframes RGBFlow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+
+#camera-reader video {
+  width: 100% !important;
+  height: auto !important;
+  object-fit: cover !important;
+  border-radius: 12px;
+}
