@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Peer } from 'peerjs';
-import { Copy, Check, QrCode, X, Camera, ArrowRight, Zap, UploadCloud, ShieldCheck, ShieldAlert, Cpu, Link2, LogOut } from 'lucide-react';
+import { Copy, Check, QrCode, X, Camera, ArrowRight, Zap, UploadCloud, ShieldCheck, ShieldAlert, Cpu, Link2, LogOut, RefreshCw } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Html5Qrcode } from 'html5-qrcode';
 
@@ -63,8 +63,59 @@ function App() {
       triggerAlert("Secure Tunnel Established! Device linked successfully.", true);
       setupConnectionListeners(conn);
     });
+    peer.on('disconnected', () => {
+      setStatus('Disconnected');
+      triggerAlert('Peer disconnected from server', false, 2200);
+    });
+    peer.on('error', (err) => {
+      console.error('Peer error:', err);
+      triggerAlert('Peer error: ' + (err?.message || 'Unexpected'), false, 3000);
+    });
     return () => peer.destroy();
   }, []);
+
+  // Global runtime error capture to surface issues as popups
+  useEffect(() => {
+    const onError = (evt) => {
+      try {
+        const msg = evt?.message || (evt?.reason && evt.reason.message) || 'Runtime error';
+        console.warn('Captured error:', evt);
+        triggerAlert('Error: ' + String(msg).slice(0, 120), false, 5000);
+      } catch {}
+    };
+
+    const origConsoleError = console.error;
+    console.error = (...args) => {
+      try { triggerAlert('Error: ' + String(args?.[0] || args?.join(' ')).slice(0, 120), false, 5000); } catch {}
+      origConsoleError.apply(console, args);
+    };
+
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onError);
+    return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onError);
+      console.error = origConsoleError;
+    };
+  }, []);
+
+  const recreatePeer = () => {
+    try {
+      if (peerRef.current) {
+        peerRef.current.destroy();
+        peerRef.current = null;
+      }
+    } catch {}
+
+    const newPeer = new Peer({
+      config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+    });
+    peerRef.current = newPeer;
+    newPeer.on('open', (id) => setPeerId(id));
+    newPeer.on('connection', (conn) => { setConnection(conn); setStatus('Connected'); setupConnectionListeners(conn); triggerAlert('Secure Tunnel Established', true); });
+    newPeer.on('error', (e) => { console.error('recreated peer error', e); triggerAlert('Peer recreate error', false); });
+    triggerAlert('Peer recreated — new ID generating', false, 1800);
+  };
 
   // 📷 Fixed Fullscreen QR Scanner Lens (Auto-kill loop on successful scan)
   useEffect(() => {
@@ -97,6 +148,9 @@ function App() {
           }
 
           setRemoteId(peerIdFromQr);
+
+          // Show a full-screen popup immediately after a successful scan
+          try { triggerAlert(`Scanned QR: ${peerIdFromQr} — attempting to connect...`, false, 2000); } catch {}
 
           // Connect with a short buffer after shutting the camera
           setTimeout(() => {
@@ -157,6 +211,9 @@ function App() {
         setShowTransferPopup(true);
         setStatus('Streaming');
 
+        // Notify user that receiving has started
+        try { triggerAlert(`Receiving: ${fileInfo.fileName || 'file'}`, true, 2500); } catch {}
+
         if ('showSaveFilePicker' in window) {
           try {
             fileHandle = await window.showSaveFilePicker({ suggestedName: fileInfo.fileName });
@@ -210,89 +267,119 @@ function App() {
   const connectToPeer = (targetId = remoteId) => {
     if (!targetId) return;
     setStatus('Pairing...');
-    
-    const conn = peerRef.current.connect(targetId, {
-      reliable: true,
-      serialization: 'none'
-    });
-    
+    if (!peerRef.current) {
+      triggerAlert('Local peer not ready', false);
+      return;
+    }
+
+    let conn;
+    try {
+      conn = peerRef.current.connect(targetId);
+    } catch (err) {
+      console.error('connect error:', err);
+      triggerAlert('Connection initiation failed', false);
+      return;
+    }
+
     setConnection(conn);
-    conn.on('open', () => { 
-      setStatus('Connected'); 
-      setupConnectionListeners(conn); 
+
+    conn.on('open', () => {
+      setStatus('Connected');
+      try { triggerAlert(`Secure Tunnel Established with ${targetId}`, true, 2600); } catch {}
+      setupConnectionListeners(conn);
+    });
+
+    conn.on('error', (err) => {
+      console.error('Peer connection error:', err);
+      triggerAlert('Connection error: ' + (err?.message || 'Unexpected'), false, 3000);
+    });
+
+    conn.on('close', () => {
+      setStatus('Disconnected');
+      setConnection(null);
+      triggerAlert('Connection closed', false, 1800);
     });
   };
 
   // 📤 SENDER SIDE: High-Speed WebRTC Loop
-  const sendFile = () => {
+  const sendFile = async () => {
     if (!connection) return;
-    const dataChannel = connection._dc || connection.dataChannel;
 
-    if (!dataChannel || dataChannel.readyState !== 'open') {
-      triggerAlert("Syncing matrix channel... Please re-fire in 1 second.", false);
+    const isOpen = (conn) => {
+      try {
+        if (!conn) return false;
+        if (conn.open === true) return true;
+        if (conn._open === true) return true;
+        if (conn.dataChannel && conn.dataChannel.readyState === 'open') return true;
+        if (conn._dc && conn._dc.readyState === 'open') return true;
+        return false;
+      } catch { return false; }
+    };
+
+    if (!isOpen(connection)) {
+      triggerAlert('Connection not ready. Wait a moment and retry.', false);
       return;
     }
 
     setStatus('Streaming');
+    try { triggerAlert('Sending: starting secure stream', true, 2000); } catch {}
     setProgress(0);
     setTransferType('Sending');
     setShowTransferPopup(true);
 
-    const CHUNK_SIZE = 64 * 1024; 
+    const CHUNK_SIZE = 64 * 1024;
     const reader = new FileReader();
-    
+
     reader.onload = async (e) => {
       const buffer = e.target.result;
       const totalChunks = Math.ceil(buffer.byteLength / CHUNK_SIZE);
-      
-      dataChannel.send(JSON.stringify({ 
-        type: 'start', 
-        fileName: file.name, 
-        fileType: file.type || 'application/octet-stream',
-        totalChunks 
-      }));
+
+      try {
+        connection.send({ type: 'start', fileName: file.name, fileType: file.type || 'application/octet-stream', totalChunks });
+      } catch (err) {
+        console.error('send start error', err);
+        triggerAlert('Failed to initiate transfer', false);
+        return;
+      }
 
       let currentChunk = 0;
 
-      const streamChunks = () => {
-        while (currentChunk < totalChunks) {
-          if (dataChannel.bufferedAmount > 1024 * 1024) {
-            dataChannel.onbufferedamountlow = () => {
-              dataChannel.onbufferedamountlow = null;
-              streamChunks(); 
-            };
-            return;
-          }
+      while (currentChunk < totalChunks) {
+        const start = currentChunk * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, buffer.byteLength);
+        const chunk = buffer.slice(start, end);
 
-          const start = currentChunk * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, buffer.byteLength);
-          const chunk = buffer.slice(start, end);
-
-          dataChannel.send(JSON.stringify({
-            type: 'chunk',
-            chunk: Array.from(new Uint8Array(chunk)), 
-            currentChunk,
-            totalChunks
-          }));
-
-          currentChunk++;
-          setProgress(Math.round((currentChunk / totalChunks) * 100));
+        try {
+          // send chunk as plain object with Array.from to keep receiver logic
+          connection.send({ type: 'chunk', chunk: Array.from(new Uint8Array(chunk)), currentChunk, totalChunks });
+        } catch (err) {
+          console.error('send chunk error', err);
+          triggerAlert('Error while sending data', false);
+          return;
         }
 
-        dataChannel.send(JSON.stringify({ type: 'end' }));
-        setStatus('Connected');
-        setProgress(100);
-        
-        setTimeout(() => {
-          setShowTransferPopup(false);
-          setProgress(0);
-          triggerAlert(`Asset Broadcast Successful: ${file.name}`, true);
-          setFile(null);
-        }, 2500);
-      };
+        currentChunk++;
+        setProgress(Math.round((currentChunk / totalChunks) * 100));
 
-      dataChannel.bufferedAmountLowThreshold = 256 * 1024;
-      streamChunks();
+        // light throttle to avoid overwhelming the channel
+        await new Promise((res) => setTimeout(res, 15));
+      }
+
+      try {
+        connection.send({ type: 'end' });
+      } catch (err) {
+        console.error('send end error', err);
+      }
+
+      setStatus('Connected');
+      setProgress(100);
+
+      setTimeout(() => {
+        setShowTransferPopup(false);
+        setProgress(0);
+        triggerAlert(`Asset Broadcast Successful: ${file.name}`, true);
+        setFile(null);
+      }, 2500);
     };
 
     reader.readAsArrayBuffer(file);
@@ -340,6 +427,9 @@ function App() {
                     </button>
                     <button onClick={() => setShowQR(!showQR)} className="p-1.5 sm:p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-purple-400 transition">
                       <QrCode size={16} />
+                    </button>
+                    <button onClick={recreatePeer} className="p-1.5 sm:p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-emerald-400 transition" title="Refresh ID">
+                      <RefreshCw size={16} />
                     </button>
                   </div>
                 </div>
